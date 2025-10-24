@@ -1,20 +1,18 @@
+# bot.py (FULL AND FINAL CODE)
+
 import os
 import time
 import asyncio
 import secrets
 import aiohttp
 import aiofiles
-import traceback  # Error details ke liye import
+import traceback
 from urllib.parse import urlparse
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
 
 from config import Config
-
-# webserver se import ki zaroorat nahi, main.py se handle hoga
-# in-memory dictionaries ko webserver.py mein hi rehne do, wahan se access honge
-from webserver import multi_clients, work_loads
 
 # --- Bot Initialization ---
 bot = Client(
@@ -24,6 +22,10 @@ bot = Client(
     bot_token=Config.BOT_TOKEN,
     workers=100
 )
+
+# Multi-client dictionaries ko yahan define karna hai
+multi_clients = {}
+work_loads = {}
 
 
 # --- Multi-Client Initialization ---
@@ -50,8 +52,8 @@ async def start_client(client_id, bot_token):
         print(f"Client {client_id} started successfully.")
     except FloodWait as e:
         print(f"FloodWait for Client {client_id}. Waiting for {e.value} seconds...")
-        await asyncio.sleep(e.value + 5)  # Adding 5 extra seconds
-        await start_client(client_id, bot_token)  # Retry starting
+        await asyncio.sleep(e.value + 5)
+        await start_client(client_id, bot_token)
     except Exception as e:
         print(f"!!! CRITICAL ERROR: Failed to start Client {client_id} - Error: {e}")
 
@@ -68,7 +70,7 @@ async def initialize_clients(main_bot_instance):
     print(f"Found {len(all_tokens)} extra clients. Starting them one by one with a delay.")
     for i, token in all_tokens.items():
         await start_client(i, token)
-        await asyncio.sleep(10)  # 10 second gap between starting each bot
+        await asyncio.sleep(10)
 
     if len(multi_clients) > 1:
         print(f"Multi-Client Mode Enabled. Total Clients: {len(multi_clients)}")
@@ -90,51 +92,22 @@ async def edit_message_with_retry(message, text):
     try:
         await message.edit_text(text)
     except FloodWait as e:
-        print(f"FloodWait received while editing message. Waiting for {e.value} seconds.")
-        await asyncio.sleep(e.value + 5)  # Adding 5 extra seconds
+        await asyncio.sleep(e.value + 5)
         await message.edit_text(text)
     except Exception as e:
         print(f"Error editing message: {e}")
 
 
-# --- Bot Handlers with SUPER Debugging ---
-
+# --- Bot Handlers ---
 print("Bot script loaded. Handlers are being registered...")
-
-# YEH NAYA FUNCTION HAR MESSAGE KO CHECK KAREGA
-@bot.on_message(filters.private, group=-1) # group=-1 ensures this runs first
-async def catch_all_private_messages(client, message: Message):
-    """Yeh function har private message ko log karega, command ho ya file."""
-    try:
-        await bot.send_message(
-            chat_id=Config.LOG_CHANNEL,
-            text=(
-                f"**[DEBUG] Received Message**\n\n"
-                f"**From User ID:** `{message.from_user.id}`\n"
-                f"**Message Type:** `{message.media or 'TEXT'}`\n"
-                f"**Content:**\n`{message.text or message.caption or 'No Text'}`"
-            )
-        )
-    except Exception as e:
-        # Agar log channel mein hi message nahi jaa raha, toh print karo
-        print(f"!!! CRITICAL: Could not send log to LOG_CHANNEL. Check channel ID and bot permissions. Error: {e}")
-
-    # Iske baad, Pyrogram doosre handlers (jaise /start, file_handler) ko check karega
-    message.continue_propagation()
-
 
 @bot.on_message(filters.command("start") & filters.private)
 async def start_command(client, message: Message):
     try:
         await message.reply_text("Hello! Send me a file or a direct download URL to get a shareable link.")
     except Exception as e:
-        # Agar reply fail ho, toh log channel mein error bhejo
         error_trace = traceback.format_exc()
         print(f"!!! ERROR in /start command: {e}\n{error_trace}")
-        await bot.send_message(
-            chat_id=Config.LOG_CHANNEL,
-            text=f"**ERROR in /start command!**\n\n**User ID:** `{message.from_user.id}`\n\n**Error:**\n`{e}`\n\n**Traceback:**\n`{error_trace}`"
-        )
 
 
 async def handle_file_upload(message: Message, user_id: int):
@@ -146,7 +119,6 @@ async def handle_file_upload(message: Message, user_id: int):
         log_text = (
             f"**File Processed Successfully**\n\n"
             f"**User:** `{user_id}`\n"
-            f"**Original Msg ID:** `{message.id}`\n"
             f"**Storage Msg ID:** `{sent_message.id}`\n"
             f"**Unique ID:** `{unique_id}`\n"
             f"**Link:** {show_link}"
@@ -160,7 +132,7 @@ async def handle_file_upload(message: Message, user_id: int):
         print(f"!!! ERROR in handle_file_upload: {e}\n{error_trace}")
         await bot.send_message(
             chat_id=Config.LOG_CHANNEL,
-            text=f"**ERROR handling file!**\n\n**User ID:** `{user_id}`\n\n**Error:**\n`{e}`\n\n**Traceback:**\n`{error_trace}`"
+            text=f"**ERROR handling file!**\n\n**User ID:** `{user_id}`\n\n**Error:**\n`{e}`"
         )
         await message.reply_text("Sorry, something went wrong. The developer has been notified.")
 
