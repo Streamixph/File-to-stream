@@ -7,4 +7,4 @@ aiohttp
 aiofiles
 jinja2
 python-magic
-zlib-fast
+motor
