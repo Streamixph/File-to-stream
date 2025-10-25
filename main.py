@@ -1,68 +1,67 @@
 import asyncio
 import os
-from pyrogram import idle
 from traceback import format_exc
 
-# Apne project ke components ko import karo
+from pyrogram import idle
+from pyrogram.errors import FloodWait, PeerIdInvalid
+
 from bot import bot, initialize_clients
 from database import db
-from webserver import app # webserver.py se FastAPI app ko import karo
+from webserver import app
 import uvicorn
+from config import Config
 
-# Uvicorn server ko configure karo
 PORT = int(os.environ.get("PORT", 8000))
-config = uvicorn.Config(app=app, host='0.0.0.0', port=PORT)
+config = uvicorn.Config(app=app, host='0.0.0.0', port=PORT, log_level="info")
 server = uvicorn.Server(config)
 
 
 async def start_services():
-    """Poore application ko start karne wala main function."""
-    print("--- Starting All Services ---")
+    """Starts all services in the correct order."""
+    print("--- Initializing Services ---")
     try:
-        # Step 1: Database se connect karo
+        # Connect to DB
         await db.connect()
 
-        # Step 2: Main Pyrogram bot ko start karo
-        print("Starting main bot instance...")
+        # Start the main bot client
+        print("Starting main bot...")
         await bot.start()
-        print("Main bot started successfully.")
+        print(f"Bot [@{bot.me.username}] started successfully.")
 
-        # Step 3: Storage channel ko cache karo (sabse zaroori fix)
-        from config import Config
-        try:
-            print(f"Attempting to get info for STORAGE_CHANNEL ({Config.STORAGE_CHANNEL}) to cache it...")
-            await bot.get_chat(Config.STORAGE_CHANNEL)
-            print("✅ Channel info cached successfully. Bot is ready.")
-        except Exception as e:
-            print(f"!!! FATAL STARTUP ERROR: Could not get channel info. Error: {e}")
-            print("!!! TROUBLESHOOTING: Make sure BOT_TOKEN and STORAGE_CHANNEL are correct, and the bot is an ADMIN in the channel.")
-            return # Agar yeh fail ho toh aage mat badho
-
-        # Step 4: Baaki multi-client bots ko start karo
-        print("Initializing multi-clients...")
+        # Pre-fetch and cache the storage channel information
+        print(f"Verifying and caching STORAGE_CHANNEL: {Config.STORAGE_CHANNEL}")
+        await bot.get_chat(Config.STORAGE_CHANNEL)
+        print("✅ STORAGE_CHANNEL is accessible.")
+        
+        # Initialize other clients
         await initialize_clients(bot)
-
-        # Step 5: Web server ko background me chalao
-        print(f"Starting web server on port {PORT}...")
+        
+        # Start the web server as a background task
+        print(f"Starting web server on http://0.0.0.0:{PORT}")
         asyncio.create_task(server.serve())
-
-        # Step 6: Bot ko chalta rakho
-        print("✅ All services started successfully! Bot is now idle and waiting for tasks.")
+        
+        print("\n✅✅✅ All services are up and running! ✅✅✅\n")
         await idle()
 
-    except Exception:
-        print(f"An error occurred during startup: {format_exc()}")
-
-async def stop_services():
-    """Application ko aaram se band karne wala function."""
-    print("--- Stopping All Services ---")
-    try:
+    except PeerIdInvalid:
+        print("\n❌❌❌ FATAL: PEER_ID_INVALID ❌❌❌")
+        print("Could not find the STORAGE_CHANNEL. This is a configuration error.")
+        print("TROUBLESHOOTING:")
+        print("1. Double-check the STORAGE_CHANNEL ID in your environment variables.")
+        print("2. Ensure the bot is an administrator in that channel.")
+        print("3. Ensure the correct BOT_TOKEN is being used.")
+    except FloodWait as e:
+        print(f"!!! FloodWait of {e.value} seconds received. Sleeping...")
+        await asyncio.sleep(e.value + 5)
+        # We will let Render restart the service after the wait.
+    except Exception as e:
+        print(f"An unexpected error occurred during startup: {format_exc()}")
+    finally:
+        print("--- Services are shutting down ---")
         if bot.is_initialized:
             await bot.stop()
         await db.disconnect()
-        print("✅ Services stopped gracefully.")
-    except Exception:
-        print(f"An error occurred during shutdown: {format_exc()}")
+        print("Shutdown complete.")
 
 
 if __name__ == '__main__':
@@ -70,6 +69,7 @@ if __name__ == '__main__':
     try:
         loop.run_until_complete(start_services())
     except KeyboardInterrupt:
-        print("Service stopping due to KeyboardInterrupt...")
+        print("Service stopping due to user interrupt.")
     finally:
-        loop.run_until_complete(stop_services())
+        if not loop.is_closed():
+            loop.close()
