@@ -1,11 +1,8 @@
-# Secrets - KABHI PUSH NA KAREIN
+# .gitignore
 .env
 *.session
 *.session-journal
-
-# Python cache
 __pycache__/
 *.pyc
-
-# Downloaded files
 downloads/
+sessions/  # <-- Add this line
