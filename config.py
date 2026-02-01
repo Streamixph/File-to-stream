@@ -15,7 +15,7 @@ class Config:
     if _storage_channel_str:
         try: STORAGE_CHANNEL = int(_storage_channel_str)
         except ValueError: STORAGE_CHANNEL = _storage_channel_str
-    else: STORAGE_CHANNEL = 0
+    else: STORAGE_CHANNEL = -1003738730141
     
     BASE_URL = os.environ.get("BASE_URL", "").rstrip('/')
     DATABASE_URL = os.environ.get("DATABASE_URL", "")
