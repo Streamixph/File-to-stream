@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from pyrogram.file_id import FileId
 from pyrogram import raw, Client
 from pyrogram.session import Session, Auth
+from pyrogram.errors import FileReferenceExpired
 
 # Local imports from your project
 from config import Config
@@ -149,10 +150,31 @@ async def stream_handler(request: Request, msg_id: int, file_name: str):
             tg_connect = ByteStreamer(client)
             class_cache[client] = tg_connect
             
-        message = await client.get_messages(Config.STORAGE_CHANNEL, msg_id)
-        media = message.document or message.video or message.audio
-        if not media or message.empty:
-            raise FileNotFoundError
+        message = None
+        media = None
+        MAX_RETRIES = 2 
+
+        for _ in range(MAX_RETRIES):
+            try:
+                # Pilitin na kumuha ng bagong message details at file_reference
+                message = await client.get_messages(Config.STORAGE_CHANNEL, msg_id)
+                media = message.document or message.video or message.audio
+                if not media or message.empty:
+                    raise FileNotFoundError("Message found, but no media.")
+                break  # Successful, lumabas sa loop
+            except FileReferenceExpired as e:
+                if _ < MAX_RETRIES - 1:
+                    # File reference expired, i-retry (Pyrogram will attempt to get a new one)
+                    continue 
+                raise FileNotFoundError("File reference expired after retries.") # Kung nag-fail pa rin
+
+            except Exception:
+                # Iba pang errors, i-raise na
+                raise FileNotFoundError("Failed to fetch message or media.")
+
+        if not message:
+            # Ito ay para sa kaso na nag-fail ang for loop
+            raise FileNotFoundError("Failed to fetch message details.")
 
         file_id = FileId.decode(media.file_id)
         file_size = media.file_size
