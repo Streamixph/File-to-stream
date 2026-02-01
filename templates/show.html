@@ -122,7 +122,7 @@ async function fetchFileData() {
             const vlc = `intent:${data.direct_dl_link}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;end`;
 
             buttonContainer.innerHTML = `
-                <a href="${data.direct_dl_link}" class="btn btn-primary">⬇ Download Now</a>
+                <a href="${data.direct_dl_link}" class="btn btn-primary">⬇ Stream Now</a>
                 <a href="${mx}" class="btn btn-secondary">▶ Play in MX Player</a>
                 <a href="${vlc}" class="btn btn-secondary">▶ Play in VLC</a>
             `;
