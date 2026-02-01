@@ -9,7 +9,6 @@ from fastapi.templating import Jinja2Templates
 from pyrogram.file_id import FileId
 from pyrogram import raw, Client
 from pyrogram.session import Session, Auth
-from pyrogram.errors import FileReferenceExpired
 
 # Local imports from your project
 from config import Config
@@ -122,10 +121,9 @@ async def show_file_page(request: Request, unique_id: str):
             "file_name": mask_filename(original_file_name),
             "file_size": get_readable_file_size(media.file_size),
             "is_media": (media.mime_type or "").startswith(("video/", "audio/")),
-            # Line 124:
-"direct_dl_link": f"{Config.BASE_URL}/dl/{storage_msg_id}/stream.m3u8",
-"mx_player_link": f"intent:{Config.BASE_URL}/dl/{storage_msg_id}/stream.m3u8#Intent;action=android.intent.action.VIEW;type=application/x-mpegurl;end",
-"vlc_player_link": f"vlc://{Config.BASE_URL}/dl/{storage_msg_id}/stream.m3u8"
+            "direct_dl_link": f"{Config.BASE_URL}/dl/{storage_msg_id}/{safe_file_name}",
+            "mx_player_link": f"intent:{Config.BASE_URL}/dl/{storage_msg_id}/{safe_file_name}#Intent;action=android.intent.action.VIEW;type={media.mime_type};end",
+            "vlc_player_link": f"vlc://{Config.BASE_URL}/dl/{storage_msg_id}/{safe_file_name}"
         }
         return templates.TemplateResponse("show.html", context)
 
@@ -150,31 +148,10 @@ async def stream_handler(request: Request, msg_id: int, file_name: str):
             tg_connect = ByteStreamer(client)
             class_cache[client] = tg_connect
             
-        message = None
-        media = None
-        MAX_RETRIES = 2 
-
-        for _ in range(MAX_RETRIES):
-            try:
-                # Pilitin na kumuha ng bagong message details at file_reference
-                message = await client.get_messages(Config.STORAGE_CHANNEL, msg_id)
-                media = message.document or message.video or message.audio
-                if not media or message.empty:
-                    raise FileNotFoundError("Message found, but no media.")
-                break  # Successful, lumabas sa loop
-            except FileReferenceExpired as e:
-                if _ < MAX_RETRIES - 1:
-                    # File reference expired, i-retry (Pyrogram will attempt to get a new one)
-                    continue 
-                raise FileNotFoundError("File reference expired after retries.") # Kung nag-fail pa rin
-
-            except Exception:
-                # Iba pang errors, i-raise na
-                raise FileNotFoundError("Failed to fetch message or media.")
-
-        if not message:
-            # Ito ay para sa kaso na nag-fail ang for loop
-            raise FileNotFoundError("Failed to fetch message details.")
+        message = await client.get_messages(Config.STORAGE_CHANNEL, msg_id)
+        media = message.document or message.video or message.audio
+        if not media or message.empty:
+            raise FileNotFoundError
 
         file_id = FileId.decode(media.file_id)
         file_size = media.file_size
@@ -199,20 +176,13 @@ async def stream_handler(request: Request, msg_id: int, file_name: str):
         
         body = tg_connect.yield_file(file_id, index, offset, first_part_cut, last_part_cut, part_count, chunk_size)
         
-     
-status_code = 206 if range_header else 200
-        
-content_type = media.mime_type or "application/octet-stream"
-        
-if file_name.endswith(".m3u8"):
-    content_type = "application/x-mpegurl"
-
-headers = {
-    "Content-Type": content_type,
-    "Accept-Ranges": "bytes",
-    "Content-Disposition": f'inline; filename="{media.file_name}"',
-    "Content-Length": str(req_length)
-}
+        status_code = 206 if range_header else 200
+        headers = {
+            "Content-Type": media.mime_type or "application/octet-stream",
+            "Accept-Ranges": "bytes",
+            "Content-Disposition": f'inline; filename="{media.file_name}"',
+            "Content-Length": str(req_length)
+        }
         if range_header:
             headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"
         

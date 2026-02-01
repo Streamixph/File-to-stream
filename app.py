@@ -339,65 +339,28 @@ class ByteStreamer:
         finally:work_loads[i]-=1
 
 @app.get("/dl/{mid}/{fname}")
-# app.py, sa loob ng @app.get("/dl/{mid}/{fname}")
 async def stream_media(r:Request,mid:int,fname:str):
-    # ... (code na pinili ang client at ByteStreamer) ...
+    if not work_loads: raise HTTPException(503)
+    client_id = min(work_loads, key=work_loads.get)
+    c = multi_clients.get(client_id)
+    if not c: raise HTTPException(503)
     
-    # DITO TAYO MAGDADAGDAG NG REFRESH LOGIC
+    tc=class_cache.get(c) or ByteStreamer(c);class_cache[c]=tc
     try:
-        msg = await c.get_messages(Config.STORAGE_CHANNEL, mid)
-        m = msg.document or msg.video or msg.audio
-        if not m or msg.empty: raise FileNotFoundError # File exists, pero walang media, o deleted
-        # ... (rest of the code for streaming) ...
-
-    # ITO ANG BAGO: Kung may error, i-try na i-refresh ang file_reference at i-retry ang pagbasa
-    except (FileNotFoundError, ConnectionError, Exception) as e: 
-        # TINGNAN: Kung ang error ay galing sa expired file reference
-        if "file reference" in str(e).lower() or "not found" in str(e).lower() or isinstance(e, ConnectionError):
-             # 1. Humanap ng Bot na Gagamitin para sa Refresh (ang Main Bot ang pinaka-sigurado)
-             refresh_bot = multi_clients.get(0)
-             if not refresh_bot: raise HTTPException(503)
-
-             # 2. I-try na Kumuha ng Bagong Message Object (ito ang nagre-refresh ng file_reference)
-             try:
-                 # Subukan na mag-get_messages ulit para makakuha ng updated file_reference
-                 new_msg = await refresh_bot.get_messages(Config.STORAGE_CHANNEL, mid)
-                 new_m = new_msg.document or new_msg.video or new_msg.audio
-                 
-                 if new_m and new_m.file_ref != m.file_reference: # Kung nag-iba ang reference
-                     # I-REPLACE ang LUMANG MESSAGE OBJECT (Ito ang trick!)
-                     msg = new_msg
-                     m = new_m
-                     print(f"✅ File Reference Refreshed for Message ID: {mid}")
-                     
-                     # 3. I-RETRY ang Streaming (dito ka mag-go-to sa streaming code)
-                     # DAHIL WALA TAYONG 'GOTO' SA PYTHON, KAILANGAN NATING BALUTIN ANG STREAMING CODE SA ISA PANG TRY-BLOCK.
-                     
-                     # --- SIMULA NG RE-STREAMING CODE ---
-                     fid=FileId.decode(m.file_id);fsize=m.file_size;rh=r.headers.get("Range","");fb,ub=0,fsize-1
-                     if rh:
-                         rps=rh.replace("bytes=","").split("-");fb=int(rps[0])
-                         if len(rps)>1 and rps[1]:ub=int(rps[1])
-                     if(ub>=fsize)or(fb<0):raise HTTPException(416)
-                     rl=ub-fb+1;cs=1024*1024;off=(fb//cs)*cs;fc=fb-off;lc=(ub%cs)+1;pc=math.ceil(rl/cs)
-                     body=tc.yield_file(fid,client_id,off,fc,lc,pc,cs);sc=206 if rh else 200
-                     hdrs={"Content-Type":m.mime_type or "application/octet-stream","Accept-Ranges":"bytes","Content-Disposition":f'inline; filename="{m.file_name}"',"Content-Length":str(rl)}
-                     if rh:hdrs["Content-Range"]=f"bytes {fb}-{ub}/{fsize}"
-                     return StreamingResponse(body,status_code=sc,headers=hdrs)
-                     # --- TAPOS NG RE-STREAMING CODE ---
-                     
-                 else:
-                     # Kung hindi pa rin ma-refresh (Hal. deleted na talaga ang file)
-                     raise HTTPException(404, detail="File Ref Expired and Refresh Failed.")
-                     
-             except Exception:
-                 print(traceback.format_exc()); raise HTTPException(404, detail="File Not Found or Access Denied.")
-        
-        # Original error (kung hindi File Reference ang problema)
-        else:
-            print(traceback.format_exc()); raise HTTPException(500)
-    
-    # ... (Ang orihinal na streaming code mo ay ilipat sa labas ng try-except) ...
+        msg=await c.get_messages(Config.STORAGE_CHANNEL,mid);m=msg.document or msg.video or msg.audio
+        if not m or msg.empty:raise FileNotFoundError
+        fid=FileId.decode(m.file_id);fsize=m.file_size;rh=r.headers.get("Range","");fb,ub=0,fsize-1
+        if rh:
+            rps=rh.replace("bytes=","").split("-");fb=int(rps[0])
+            if len(rps)>1 and rps[1]:ub=int(rps[1])
+        if(ub>=fsize)or(fb<0):raise HTTPException(416)
+        rl=ub-fb+1;cs=1024*1024;off=(fb//cs)*cs;fc=fb-off;lc=(ub%cs)+1;pc=math.ceil(rl/cs)
+        body=tc.yield_file(fid,client_id,off,fc,lc,pc,cs);sc=206 if rh else 200
+        hdrs={"Content-Type":m.mime_type or "application/octet-stream","Accept-Ranges":"bytes","Content-Disposition":f'inline; filename="{m.file_name}"',"Content-Length":str(rl)}
+        if rh:hdrs["Content-Range"]=f"bytes {fb}-{ub}/{fsize}"
+        return StreamingResponse(body,status_code=sc,headers=hdrs)
+    except FileNotFoundError:raise HTTPException(404)
+    except Exception:print(traceback.format_exc());raise HTTPException(500)
 
 # =====================================================================================
 # --- MAIN EXECUTION BLOCK ---
